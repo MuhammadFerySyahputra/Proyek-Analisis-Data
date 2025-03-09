@@ -1,8 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 # 🛠 Set konfigurasi halaman Streamlit
 st.set_page_config(page_title="E-Commerce Data Analysis", page_icon="📊", layout="wide")
@@ -16,64 +15,43 @@ def load_data():
 
 all_data = load_data()
 
-# Menentukan tanggal analisis
-max_date = all_data['order_purchase_timestamp'].max() + timedelta(days=1)
+# Sidebar untuk filter interaktif
+st.sidebar.header("🔍 Filter Data")
 
-# Menghitung Recency, Frequency, dan Monetary (RFM)
-rfm = all_data.groupby('customer_id').agg({
-    'order_purchase_timestamp': lambda x: (max_date - x.max()).days,
-    'order_id': 'count',
-    'payment_value': 'sum'
-}).rename(columns={
-    'order_purchase_timestamp': 'recency',
-    'order_id': 'frequency',
-    'payment_value': 'monetary'
-})
+# Filter tanggal
+min_date = all_data['order_purchase_timestamp'].min()
+max_date = all_data['order_purchase_timestamp'].max()
+date_range = st.sidebar.date_input("Pilih Rentang Tanggal", [min_date, max_date], min_value=min_date, max_value=max_date)
+filtered_data = all_data[(all_data['order_purchase_timestamp'] >= pd.to_datetime(date_range[0])) & (all_data['order_purchase_timestamp'] <= pd.to_datetime(date_range[1]))]
+
+# Filter kategori produk
+categories = all_data['product_category_name'].dropna().unique()
+selected_category = st.sidebar.selectbox("Pilih Kategori Produk", ['Semua'] + list(categories))
+if selected_category != 'Semua':
+    filtered_data = filtered_data[filtered_data['product_category_name'] == selected_category]
+
+# Filter jumlah transaksi pelanggan
+min_trans, max_trans = int(filtered_data['order_id'].nunique()), int(all_data['order_id'].nunique())
+trans_range = st.sidebar.slider("Filter Jumlah Transaksi", min_trans, max_trans, (min_trans, max_trans))
+filtered_data = filtered_data.groupby('customer_unique_id').filter(lambda x: min_trans <= len(x) <= trans_range[1])
 
 # Dashboard
 st.title("📊 E-Commerce Data Analysis Dashboard")
 st.markdown("---")
 
-# Sidebar untuk filter
-st.sidebar.header("🔍 Filter Data")
-recency_range = st.sidebar.slider("Recency Range", int(rfm['recency'].min()), int(rfm['recency'].max()), (int(rfm['recency'].min()), int(rfm['recency'].max())))
-frequency_range = st.sidebar.slider("Frequency Range", int(rfm['frequency'].min()), int(rfm['frequency'].max()), (int(rfm['frequency'].min()), int(rfm['frequency'].max())))
-monetary_range = st.sidebar.slider("Monetary Range", float(rfm['monetary'].min()), float(rfm['monetary'].max()), (float(rfm['monetary'].min()), float(rfm['monetary'].max())))
+# Visualisasi 1: Kategori Produk dengan Penjualan Tertinggi
+st.subheader("🏆 Kategori Produk dengan Penjualan Tertinggi")
+top_categories = filtered_data['product_category_name'].value_counts().head(10).reset_index()
+top_categories.columns = ['Kategori Produk', 'Jumlah Penjualan']
+fig1 = px.bar(top_categories, x='Jumlah Penjualan', y='Kategori Produk', orientation='h', color='Jumlah Penjualan', title='Top 10 Kategori Produk', color_continuous_scale='Blues')
+st.plotly_chart(fig1, use_container_width=True)
 
-# Filter data berdasarkan slider
-filtered_rfm = rfm[(rfm['recency'].between(recency_range[0], recency_range[1])) &
-                    (rfm['frequency'].between(frequency_range[0], frequency_range[1])) &
-                    (rfm['monetary'].between(monetary_range[0], monetary_range[1]))]
-
-st.subheader("📌 RFM Summary (Filtered)")
-st.write(filtered_rfm.describe())
-
-# Menampilkan metrik utama
-total_customers = filtered_rfm.shape[0]
-avg_recency = filtered_rfm['recency'].mean()
-avg_frequency = filtered_rfm['frequency'].mean()
-avg_monetary = filtered_rfm['monetary'].mean()
-
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("Total Customers", total_customers)
-col2.metric("Avg Recency", f"{avg_recency:.2f} days")
-col3.metric("Avg Frequency", f"{avg_frequency:.2f} orders")
-col4.metric("Avg Monetary", f"${avg_monetary:.2f}")
-
-# Visualisasi Distribusi Recency
-st.subheader("📈 Recency Distribution")
-fig_recency = px.histogram(filtered_rfm, x='recency', nbins=50, title='Recency Distribution', color_discrete_sequence=['blue'])
-st.plotly_chart(fig_recency, use_container_width=True)
-
-# Visualisasi Distribusi Frequency
-st.subheader("📉 Frequency Distribution")
-fig_frequency = px.histogram(filtered_rfm, x='frequency', nbins=50, title='Frequency Distribution', color_discrete_sequence=['green'])
-st.plotly_chart(fig_frequency, use_container_width=True)
-
-# Visualisasi Distribusi Monetary
-st.subheader("💰 Monetary Distribution")
-fig_monetary = px.histogram(filtered_rfm, x='monetary', nbins=50, title='Monetary Distribution', color_discrete_sequence=['orange'])
-st.plotly_chart(fig_monetary, use_container_width=True)
+# Visualisasi 2: Tren Penjualan Berdasarkan Waktu
+st.subheader("📅 Tren Penjualan Berdasarkan Waktu")
+filtered_data['order_date'] = filtered_data['order_purchase_timestamp'].dt.date
+sales_trend = filtered_data.groupby('order_date').size().reset_index(name='Jumlah Order')
+fig2 = px.line(sales_trend, x='order_date', y='Jumlah Order', title='Tren Penjualan dari Waktu ke Waktu', markers=True)
+st.plotly_chart(fig2, use_container_width=True)
 
 st.markdown("---")
 st.caption("📌 Dashboard dibuat dengan Streamlit dan Plotly | Data: E-Commerce Public Dataset")
